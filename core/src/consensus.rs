@@ -17,7 +17,7 @@ use {
         tower1_14_11::Tower1_14_11,
         tower1_7_14::Tower1_7_14,
         tower_storage::{SavedTower, SavedTowerVersions, TowerStorage},
-        tower_vote_state::TowerVoteState,
+        tower_vote_state::{TowerVoteState, process_slot_vote_unchecked},
     },
     crate::replay_stage::DUPLICATE_THRESHOLD,
     chrono::prelude::*,
@@ -39,7 +39,7 @@ use {
         vote_error::VoteError,
         vote_instruction,
         vote_state::{
-            process_slot_vote_unchecked, BlockTimestamp, Lockout, TowerSync, Vote,
+            BlockTimestamp, Lockout, TowerSync, Vote,
             VoteState1_14_11, VoteStateUpdate, VoteTransaction, MAX_LOCKOUT_HISTORY,
         },
     },
@@ -220,7 +220,7 @@ pub(crate) enum BlockhashStatus {
     Blockhash(Hash),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tower {
     pub node_pubkey: Pubkey,
     pub(crate) threshold_depth: usize,

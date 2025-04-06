@@ -79,6 +79,11 @@ impl TowerVoteState {
     }
 }
 
+// Добавить новую функцию для совместимости с интерфейсом process_slot_vote_unchecked
+pub fn process_slot_vote_unchecked(vote_state: &mut TowerVoteState, slot: Slot) {
+    vote_state.process_next_vote_slot(slot);
+}
+
 impl From<VoteState> for TowerVoteState {
     fn from(vote_state: VoteState) -> Self {
         let VoteState {
