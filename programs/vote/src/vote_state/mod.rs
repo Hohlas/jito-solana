@@ -735,9 +735,16 @@ pub fn process_vote_unfiltered(
     pop_expired: bool,
 ) -> Result<(), VoteError> {
     check_slots_are_valid(vote_state, vote_slots, &vote.hash, slot_hashes)?;
+    
+    if pop_expired { // Сначала обрабатываем истекшие голоса для всех слотов
+        vote_slots.iter().for_each(|s| vote_state.pop_expired_votes(*s));
+    }
+    
+    // Затем обрабатываем каждый голос
     vote_slots
         .iter()
-        .for_each(|s| vote_state.process_next_vote_slot(*s, epoch, current_slot, pop_expired));
+        .for_each(|s| vote_state.process_next_vote_slot(*s, epoch, current_slot));
+    
     Ok(())
 }
 
