@@ -187,6 +187,7 @@ pub struct ForkStats {
     pub is_locked_out: bool,
     pub voted_stakes: VotedStakes,
     pub duplicate_confirmed_hash: Option<Hash>,
+    pub is_mostly_confirmed: bool,
     pub computed: bool,
     pub lockout_intervals: LockoutIntervals,
     pub bank_hash: Option<Hash>,
