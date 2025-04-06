@@ -55,6 +55,8 @@ use {
         time::SystemTime,
     },
     thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
@@ -290,11 +292,6 @@ impl From<Tower> for Tower1_14_11 {
             last_timestamp: tower.last_timestamp,
             stray_restored_slot: tower.stray_restored_slot,
             last_switch_threshold_check: tower.last_switch_threshold_check,
-            mostly_confirmed_threshold: None,
-            threshold_ahead_count: None,
-            after_skip_threshold: None,
-            threshold_escape_count: None,
-            last_config_check_seconds: 0,
         }
     }
 }
