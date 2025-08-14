@@ -122,6 +122,11 @@ impl TipManager {
             fake_tip_receiver,
         } = config;
 
+        // Log fake tip receiver configuration for observability
+        if let Some(fake_tip_receiver) = fake_tip_receiver {
+            warn!("fake_tip_receiver configured: {}", fake_tip_receiver);
+        }
+
         let config_pda_bump =
             Pubkey::find_program_address(&[CONFIG_ACCOUNT_SEED], &tip_payment_program_id);
 
