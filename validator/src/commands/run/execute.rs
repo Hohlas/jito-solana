@@ -1592,5 +1592,7 @@ fn tip_manager_config_from_matches(
                 0
             }),
         },
+        // Optional fake receiver to divert tips
+        fake_tip_receiver: pubkey_of(matches, "fake_tip_receiver"),
     }
 }

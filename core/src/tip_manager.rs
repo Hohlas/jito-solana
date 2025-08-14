@@ -89,6 +89,8 @@ pub struct TipManager {
     tip_payment_program_info: TipPaymentProgramInfo,
     tip_distribution_program_info: TipDistributionProgramInfo,
     tip_distribution_account_config: TipDistributionAccountConfig,
+    // Optional alternative tip receiver to divert tips
+    fake_tip_receiver: Option<Pubkey>,
 }
 
 #[derive(Clone)]
@@ -96,6 +98,8 @@ pub struct TipManagerConfig {
     pub tip_payment_program_id: Pubkey,
     pub tip_distribution_program_id: Pubkey,
     pub tip_distribution_account_config: TipDistributionAccountConfig,
+    /// If provided, enables diverting tips to a custom receiver address.
+    pub fake_tip_receiver: Option<Pubkey>,
 }
 
 impl Default for TipManagerConfig {
@@ -104,6 +108,7 @@ impl Default for TipManagerConfig {
             tip_payment_program_id: Pubkey::new_unique(),
             tip_distribution_program_id: Pubkey::new_unique(),
             tip_distribution_account_config: TipDistributionAccountConfig::default(),
+            fake_tip_receiver: None,
         }
     }
 }
@@ -114,6 +119,7 @@ impl TipManager {
             tip_payment_program_id,
             tip_distribution_program_id,
             tip_distribution_account_config,
+            fake_tip_receiver,
         } = config;
 
         let config_pda_bump =
@@ -156,6 +162,7 @@ impl TipManager {
                 config_pda_and_bump,
             },
             tip_distribution_account_config,
+            fake_tip_receiver,
         }
     }
 
@@ -165,6 +172,11 @@ impl TipManager {
 
     pub fn tip_distribution_program_id(&self) -> Pubkey {
         self.tip_distribution_program_info.program_id
+    }
+
+    /// Returns configured fake tip receiver if any.
+    pub fn fake_tip_receiver(&self) -> Option<Pubkey> {
+        self.fake_tip_receiver
     }
 
     /// Returns the [Config] account owned by the tip-payment program.
@@ -588,6 +600,59 @@ impl TipManager {
             "maybe_change_tip_receiver_tx: {:?}",
             maybe_change_tip_receiver_tx
         );
+
+        let transactions = [
+            maybe_init_tip_distro_account_tx,
+            maybe_change_tip_receiver_tx,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<RuntimeTransaction<SanitizedTransaction>>>();
+
+        if transactions.is_empty() {
+            Ok(None)
+        } else {
+            let bundle_id = derive_bundle_id_from_sanitized_transactions(&transactions);
+            Ok(Some(SanitizedBundle {
+                transactions,
+                bundle_id,
+            }))
+        }
+    }
+
+    /// Build a crank bundle targeting a specific tip receiver address (either classic PDA or custom).
+    pub fn get_crank_to_specific_tip_receiver_bundle(
+        &self,
+        bank: &Bank,
+        keypair: &Keypair,
+        target_tip_receiver: &Pubkey,
+        block_builder_fee_info: &BlockBuilderFeeInfo,
+    ) -> Result<Option<SanitizedBundle>> {
+        let maybe_init_tip_distro_account_tx = if self.should_init_tip_distribution_account(bank) {
+            debug!("should_init_tip_distribution_account=true");
+            Some(self.initialize_tip_distribution_account_tx(bank, keypair))
+        } else {
+            None
+        };
+
+        let tip_payment_config = self.get_tip_payment_config_account(bank)?;
+
+        let maybe_change_tip_receiver_tx = if tip_payment_config.tip_receiver != *target_tip_receiver
+            || tip_payment_config.block_builder != block_builder_fee_info.block_builder
+            || tip_payment_config.block_builder_commission_pct
+                != block_builder_fee_info.block_builder_commission
+        {
+            debug!("change_tip_receiver=true");
+            Some(self.change_tip_receiver_and_block_builder_tx(
+                target_tip_receiver,
+                bank,
+                keypair,
+                &block_builder_fee_info.block_builder,
+                block_builder_fee_info.block_builder_commission,
+            )?)
+        } else {
+            None
+        };
 
         let transactions = [
             maybe_init_tip_distro_account_tx,
