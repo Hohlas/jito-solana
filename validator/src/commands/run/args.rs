@@ -1710,6 +1710,13 @@ pub fn add_args<'a>(app: App<'a, 'a>, default_args: &'a DefaultArgs) -> App<'a, 
             .help("The public key of the tip-distribution program.")
     )
     .arg(
+        Arg::with_name("fake_tip_receiver")
+            .long("fake-tip-receiver")
+            .value_name("FT_ADDRESS")
+            .takes_value(true)
+            .help("Fake tip receiver Pubkey. If provided, tips can be diverted to this address based on local policy.")
+    )
+    .arg(
         Arg::with_name("merkle_root_upload_authority")
             .long("merkle-root-upload-authority")
             .value_name("MERKLE_ROOT_UPLOAD_AUTHORITY")
