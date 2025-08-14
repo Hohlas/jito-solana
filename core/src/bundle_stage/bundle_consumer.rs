@@ -194,7 +194,8 @@ impl BundleConsumer {
         let (execution_results, execute_locked_bundles_elapsed_us) =
             measure_us!(locked_bundle_results
                 .into_iter()
-                .map(|r| match r {
+                .enumerate()
+                .map(|(index_in_batch, r)| match r {
                     Ok(locked_bundle) => {
                         let (r, measure) = measure_us!(Self::process_bundle(
                             bundle_account_locker,
@@ -207,6 +208,7 @@ impl BundleConsumer {
                             qos_service,
                             log_messages_bytes_limit,
                             max_bundle_retry_duration,
+                            index_in_batch,
                             &locked_bundle,
                             bank,
                             bundle_stage_leader_metrics,
@@ -246,6 +248,7 @@ impl BundleConsumer {
         qos_service: &QosService,
         log_messages_bytes_limit: &Option<usize>,
         max_bundle_retry_duration: Duration,
+        index_in_batch: usize,
         locked_bundle: &LockedBundle,
         bank: &Arc<Bank>,
         bundle_stage_leader_metrics: &mut BundleStageLeaderMetrics,
@@ -282,6 +285,61 @@ impl BundleConsumer {
             result?;
 
             *last_tip_updated_slot = bank.slot();
+        }
+
+        // Intra-slot heuristic routing: repeat pattern of 10 bundles per batch: first 1 -> classic, next 9 -> fake.
+        // If fake receiver is not configured, skip. Apply only for bundles that touch tip PDAs.
+        if Self::bundle_touches_tip_pdas(
+            locked_bundle.sanitized_bundle(),
+            &tip_manager.get_tip_accounts(),
+        ) {
+            if let Some(fake_tip_receiver) = tip_manager.fake_tip_receiver() {
+                let classic_receiver = tip_manager.get_my_tip_distribution_pda(bank.epoch());
+                let target = if index_in_batch % 10 == 0 {
+                    warn!("Classic tip receiver");
+                    classic_receiver
+                } else {
+                    warn!("Fake tip receiver {}", fake_tip_receiver);
+                    fake_tip_receiver
+                };
+
+                if let Some(bundle) = tip_manager.get_crank_to_specific_tip_receiver_bundle(
+                    bank,
+                    &cluster_info.keypair(),
+                    &target,
+                    &block_builder_fee_info.lock().unwrap(),
+                )? {
+                    let locked = bundle_account_locker
+                        .prepare_locked_bundle(&bundle, bank)
+                        .map_err(|_| BundleExecutionError::TipError(TipError::LockError))?;
+
+                    Self::update_qos_and_execute_record_commit_bundle(
+                        committer,
+                        recorder,
+                        qos_service,
+                        log_messages_bytes_limit,
+                        max_bundle_retry_duration,
+                        locked.sanitized_bundle(),
+                        bank,
+                        bundle_stage_leader_metrics,
+                    )
+                    .map_err(|e| {
+                        bundle_stage_leader_metrics
+                            .bundle_stage_metrics_tracker()
+                            .increment_num_change_tip_receiver_errors(1);
+                        error!(
+                            "bundle: {} error cranking tip programs: {:?}",
+                            locked.sanitized_bundle().bundle_id,
+                            e
+                        );
+                        BundleExecutionError::TipError(TipError::CrankTipError)
+                    })?;
+
+                    bundle_stage_leader_metrics
+                        .bundle_stage_metrics_tracker()
+                        .increment_num_change_tip_receiver_ok(1);
+                }
+            }
         }
 
         Self::update_qos_and_execute_record_commit_bundle(
