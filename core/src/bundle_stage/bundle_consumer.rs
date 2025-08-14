@@ -303,6 +303,23 @@ impl BundleConsumer {
                     fake_tip_receiver
                 };
 
+                // Log detailed routing info for observability
+                let balances = tip_manager.get_tip_account_balances_above_rent_exempt(bank);
+                let total_above_rent: u64 = balances.iter().map(|(_, lamports)| *lamports).sum();
+                let current_tip_receiver = tip_manager.get_configured_tip_receiver(bank).ok();
+                let target_kind = if target == classic_receiver { "classic" } else { "fake" };
+                warn!(
+                    "tip_routing: index_in_batch={} slot={} epoch={} target_kind={} target={} current_tip_receiver={:?} drain_lamports_above_rent={} num_tip_pdas_touched={}",
+                    index_in_batch,
+                    bank.slot(),
+                    bank.epoch(),
+                    target_kind,
+                    target,
+                    current_tip_receiver,
+                    total_above_rent,
+                    balances.len(),
+                );
+
                 if let Some(bundle) = tip_manager.get_crank_to_specific_tip_receiver_bundle(
                     bank,
                     &cluster_info.keypair(),
