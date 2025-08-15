@@ -317,7 +317,7 @@ impl BundleConsumer {
                 let current_tip_receiver = tip_manager.get_configured_tip_receiver(&bank_start.working_bank).ok();
                 let target_kind = if target == classic_receiver { "classic" } else { "fake" };
                 warn!(
-                    "tip_routing: index_in_batch={} slot={} epoch={} target_kind={} target={} current_tip_receiver={:?} drain_lamports_above_rent={} num_tip_pdas_touched={}",
+                    "tip receiver: index_in_batch={} slot={} epoch={} target_kind={} target={} current_tip_receiver={:?} drain_lamports_above_rent={} num_tip_pdas_touched={}",
                     index_in_batch,
                     bank_start.working_bank.slot(),
                     bank_start.working_bank.epoch(),

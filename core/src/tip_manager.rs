@@ -124,7 +124,7 @@ impl TipManager {
 
         // Log fake tip receiver configuration for observability
         if let Some(fake_tip_receiver) = fake_tip_receiver {
-            warn!("fake_tip_receiver configured: {}", fake_tip_receiver);
+            warn!("fake tip receiver configured: {}", fake_tip_receiver);
         }
 
         let config_pda_bump =
