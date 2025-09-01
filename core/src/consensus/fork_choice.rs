@@ -144,8 +144,11 @@ fn recheck_fork_decision_failed_switch_threshold(
     // then there will be no blocks to include the votes for slot 4, and the network halts
     // because 90% of validators can't vote
     info!(
-        "Waiting to switch vote to {heaviest_bank_slot}, resetting to slot {:?} for now, switch \
-         proof stake: {switch_proof_stake}, threshold stake: {}, total stake: {total_stake}",
+        "Waiting to switch vote to {heaviest_bank_slot}, \
+        resetting to slot {:?} for now, \
+        switch proof stake: {switch_proof_stake}, \
+        threshold stake: {}, \
+        total stake: {total_stake}",
         reset_bank.as_ref().map(|b| b.slot()),
         total_stake as f64 * SWITCH_FORK_THRESHOLD,
     );
@@ -416,7 +419,8 @@ pub fn select_vote_and_reset_forks(
     progress: &ProgressMap,
     tower: &mut Tower,
     latest_validator_votes_for_frozen_banks: &LatestValidatorVotesForFrozenBanks,
-    fork_choice: &HeaviestSubtreeForkChoice,
+    fork_choice: &HeaviestSubtreeForkChoice, 
+    last_logged_vote_slot: &mut Slot,
 ) -> SelectVoteAndResetForkResult {
     // Try to vote on the actual heaviest fork. If the heaviest bank is
     // locked out or fails the threshold check, the validator will:
@@ -475,6 +479,10 @@ pub fn select_vote_and_reset_forks(
         &switch_fork_decision,
     ) {
         // We can vote!
+        if candidate_vote_bank.slot() != *last_logged_vote_slot {
+            //info!("voting: {} {:.1}%", candidate_vote_bank.slot(), 100.0 * fork_weight);
+            *last_logged_vote_slot = candidate_vote_bank.slot();
+            }
         SelectVoteAndResetForkResult {
             vote_bank: Some((candidate_vote_bank.clone(), switch_fork_decision)),
             reset_bank: Some(candidate_vote_bank.clone()),
