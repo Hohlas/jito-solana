@@ -722,6 +722,8 @@ impl ReplayStage {
                     break;
                 }
 
+                tower.update_config();
+
                 let mut generate_new_bank_forks_time =
                     Measure::start("generate_new_bank_forks_time");
                 Self::generate_new_bank_forks(

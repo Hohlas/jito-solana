@@ -475,7 +475,7 @@ impl Tower {
                 );
             }
 
-            vote_state.process_next_vote_slot(bank_slot);
+            vote_state.process_next_vote_slot(bank_slot, true);
 
             for vote in &vote_state.votes {
                 vote_slots.insert(vote.slot());
@@ -974,7 +974,7 @@ impl Tower {
         // remaining voted slots are on a different fork from the checked slot,
         // it's still locked out.
         let mut vote_state = self.vote_state.clone();
-        vote_state.process_next_vote_slot(slot);
+        vote_state.process_next_vote_slot(slot, true);
         for vote in &vote_state.votes {
             if slot != vote.slot() && !ancestors.contains(&vote.slot()) {
                 return true;
@@ -1512,7 +1512,7 @@ impl Tower {
         let mut threshold_decisions = vec![];
         // Generate the vote state assuming this vote is included.
         let mut vote_state = self.vote_state.clone();
-        vote_state.process_next_vote_slot(slot);
+        vote_state.process_next_vote_slot(slot, true);
 
         // Assemble all the vote thresholds and depths to check.
         let vote_thresholds_and_depths = vec![

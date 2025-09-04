@@ -112,7 +112,7 @@ impl VoteSimulator {
                         parent_bank.get_vote_account(&keypairs.vote_keypair.pubkey())
                     {
                         let mut vote_state = TowerVoteState::from(vote_account.vote_state_view());
-                        vote_state.process_next_vote_slot(parent);
+                        vote_state.process_next_vote_slot(parent, true);
                         TowerSync::new(
                             vote_state.votes,
                             vote_state.root_slot,
