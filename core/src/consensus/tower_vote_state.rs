@@ -33,7 +33,7 @@ impl TowerVoteState {
             .and_then(|pos| self.votes.get(pos))
     }
 
-    pub fn process_next_vote_slot(&mut self, next_vote_slot: Slot) {
+    pub fn process_next_vote_slot(&mut self, next_vote_slot: Slot, pop_expired: bool) {
         // Ignore votes for slots earlier than we already have votes for
         if self
             .last_voted_slot()
@@ -42,7 +42,9 @@ impl TowerVoteState {
             return;
         }
 
-        self.pop_expired_votes(next_vote_slot);
+        if pop_expired {
+            self.pop_expired_votes(next_vote_slot);
+        }
 
         // Once the stack is full, pop the oldest lockout and distribute rewards
         if self.votes.len() == MAX_LOCKOUT_HISTORY {
@@ -151,14 +153,14 @@ mod tests {
         let mut vote_state = TowerVoteState::default();
 
         // Process initial vote
-        vote_state.process_next_vote_slot(1);
+        vote_state.process_next_vote_slot(1, true);
         assert_eq!(vote_state.votes.len(), 1);
         assert_eq!(vote_state.votes[0].slot(), 1);
         assert_eq!(vote_state.votes[0].confirmation_count(), 1);
         assert_eq!(vote_state.root_slot, None);
 
         // Process second vote
-        vote_state.process_next_vote_slot(2);
+        vote_state.process_next_vote_slot(2, true);
         assert_eq!(vote_state.votes.len(), 2);
         assert_eq!(vote_state.votes[0].slot(), 1);
         assert_eq!(vote_state.votes[0].confirmation_count(), 2);
@@ -172,7 +174,7 @@ mod tests {
 
         // Fill up the vote history
         for i in 0..(MAX_LOCKOUT_HISTORY + 1) {
-            vote_state.process_next_vote_slot(i as u64);
+            vote_state.process_next_vote_slot(i as u64, true);
         }
 
         // Verify the earliest vote was popped and became the root
@@ -191,12 +193,12 @@ mod tests {
         // second vote
         let top_vote = vote_state.votes.front().unwrap().slot();
         let slot = vote_state.last_lockout().unwrap().last_locked_out_slot();
-        vote_state.process_next_vote_slot(slot);
+        vote_state.process_next_vote_slot(slot, true);
         assert_eq!(Some(top_vote), vote_state.root_slot);
 
         // Expire everything except the first vote
         let slot = vote_state.votes.front().unwrap().last_locked_out_slot();
-        vote_state.process_next_vote_slot(slot);
+        vote_state.process_next_vote_slot(slot, true);
         // First vote and new vote are both stored for a total of 2 votes
         assert_eq!(vote_state.votes.len(), 2);
     }
@@ -206,7 +208,7 @@ mod tests {
         let mut vote_state = TowerVoteState::default();
 
         for i in 0..3 {
-            vote_state.process_next_vote_slot(i as u64);
+            vote_state.process_next_vote_slot(i as u64, true);
         }
 
         check_lockouts(&vote_state);
@@ -214,17 +216,17 @@ mod tests {
         // Expire the third vote (which was a vote for slot 2). The height of the
         // vote stack is unchanged, so none of the previous votes should have
         // doubled in lockout
-        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 1) as u64);
+        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 1) as u64, true);
         check_lockouts(&vote_state);
 
         // Vote again, this time the vote stack depth increases, so the votes should
         // double for everybody
-        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 2) as u64);
+        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 2) as u64, true);
         check_lockouts(&vote_state);
 
         // Vote again, this time the vote stack depth increases, so the votes should
         // double for everybody
-        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 3) as u64);
+        vote_state.process_next_vote_slot((2 + INITIAL_LOCKOUT + 3) as u64, true);
         check_lockouts(&vote_state);
     }
 
@@ -233,14 +235,14 @@ mod tests {
         let mut vote_state = TowerVoteState::default();
 
         for i in 0..3 {
-            vote_state.process_next_vote_slot(i as u64);
+            vote_state.process_next_vote_slot(i as u64, true);
         }
 
         assert_eq!(vote_state.votes[0].confirmation_count(), 3);
 
         // Expire the second and third votes
         let expire_slot = vote_state.votes[1].slot() + vote_state.votes[1].lockout() + 1;
-        vote_state.process_next_vote_slot(expire_slot);
+        vote_state.process_next_vote_slot(expire_slot, true);
         assert_eq!(vote_state.votes.len(), 2);
 
         // Check that the old votes expired
@@ -248,7 +250,7 @@ mod tests {
         assert_eq!(vote_state.votes[1].slot(), expire_slot);
 
         // Process one more vote
-        vote_state.process_next_vote_slot(expire_slot + 1);
+        vote_state.process_next_vote_slot(expire_slot + 1, true);
 
         // Confirmation count for the older first vote should remain unchanged
         assert_eq!(vote_state.votes[0].confirmation_count(), 3);
@@ -264,15 +266,15 @@ mod tests {
 
         // Add enough votes to create first root
         for i in 0..(MAX_LOCKOUT_HISTORY + 1) {
-            vote_state.process_next_vote_slot(i as u64);
+            vote_state.process_next_vote_slot(i as u64, true);
         }
         assert_eq!(vote_state.root_slot, Some(0));
 
         // Add more votes to advance root
-        vote_state.process_next_vote_slot(MAX_LOCKOUT_HISTORY as u64 + 1);
+        vote_state.process_next_vote_slot(MAX_LOCKOUT_HISTORY as u64 + 1, true);
         assert_eq!(vote_state.root_slot, Some(1));
 
-        vote_state.process_next_vote_slot(MAX_LOCKOUT_HISTORY as u64 + 2);
+        vote_state.process_next_vote_slot(MAX_LOCKOUT_HISTORY as u64 + 2, true);
         assert_eq!(vote_state.root_slot, Some(2));
     }
 
@@ -281,11 +283,11 @@ mod tests {
         let mut vote_state = TowerVoteState::default();
 
         // Process initial votes
-        vote_state.process_next_vote_slot(1);
-        vote_state.process_next_vote_slot(2);
+        vote_state.process_next_vote_slot(1, true);
+        vote_state.process_next_vote_slot(2, true);
 
         // Try duplicate vote
-        vote_state.process_next_vote_slot(1);
+        vote_state.process_next_vote_slot(1, true);
 
         // Verify the vote state (duplicate should not affect anything)
         assert_eq!(vote_state.votes.len(), 2);
@@ -293,7 +295,7 @@ mod tests {
         assert_eq!(vote_state.votes[1].slot(), 2);
 
         // Try duplicate vote
-        vote_state.process_next_vote_slot(2);
+        vote_state.process_next_vote_slot(2, true);
 
         // Verify the vote state (duplicate should not affect anything)
         assert_eq!(vote_state.votes.len(), 2);
@@ -309,8 +311,8 @@ mod tests {
         };
 
         // Add votes after root
-        vote_state.process_next_vote_slot(6);
-        vote_state.process_next_vote_slot(7);
+        vote_state.process_next_vote_slot(6, true);
+        vote_state.process_next_vote_slot(7, true);
 
         // Verify votes after root are tracked
         assert_eq!(vote_state.votes.len(), 2);
@@ -320,7 +322,7 @@ mod tests {
 
         // Fill up vote history to advance root
         for i in 8..=(MAX_LOCKOUT_HISTORY as u64 + 8) {
-            vote_state.process_next_vote_slot(i);
+            vote_state.process_next_vote_slot(i, true);
         }
 
         // Verify root has advanced
