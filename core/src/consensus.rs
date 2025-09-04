@@ -37,17 +37,20 @@ use {
         vote_error::VoteError,
         vote_instruction,
         vote_state::{
-            BlockTimestamp, Lockout, TowerSync, Vote, VoteState1_14_11, VoteStateUpdate,
+            process_slot_vote_unchecked, BlockTimestamp, Lockout, TowerSync, Vote, LandedVote, VoteState1_14_11, VoteStateUpdate,
             MAX_LOCKOUT_HISTORY,
         },
     },
     std::{
         cmp::Ordering,
         collections::{HashMap, HashSet},
+        fs::read_to_string,
         ops::{
             Bound::{Included, Unbounded},
             Deref,
         },
+        path::Path,
+        time::SystemTime,
     },
     thiserror::Error,
 };
@@ -235,6 +238,11 @@ pub struct Tower {
     // bank_forks (=~ ledger) lacks the slot or not.
     stray_restored_slot: Option<Slot>,
     pub last_switch_threshold_check: Option<(Slot, SwitchForkDecision)>,
+    mostly_confirmed_threshold: Option<f64>,
+    threshold_ahead_count: Option<u8>,
+    after_skip_threshold: Option<u8>,
+    threshold_escape_count: Option<u8>,
+    last_config_check_seconds: u64,
 }
 
 impl Default for Tower {
@@ -249,6 +257,11 @@ impl Default for Tower {
             last_vote_tx_blockhash: BlockhashStatus::default(),
             stray_restored_slot: Option::default(),
             last_switch_threshold_check: Option::default(),
+            mostly_confirmed_threshold: None,
+            threshold_ahead_count: None,
+            after_skip_threshold: None,
+            threshold_escape_count: None,
+            last_config_check_seconds: 0,
         };
         // VoteState::root_slot is ensured to be Some in Tower
         tower.vote_state.root_slot = Some(Slot::default());
@@ -288,6 +301,11 @@ impl From<Tower1_14_11> for Tower {
             last_timestamp: tower.last_timestamp,
             stray_restored_slot: tower.stray_restored_slot,
             last_switch_threshold_check: tower.last_switch_threshold_check,
+            mostly_confirmed_threshold: None, // Значения по умолчанию для новых полей
+            threshold_ahead_count: None,
+            after_skip_threshold: None,
+            threshold_escape_count: None,
+            last_config_check_seconds: 0,
         }
     }
 }
@@ -306,6 +324,11 @@ impl From<Tower1_7_14> for Tower {
             last_timestamp: tower.last_timestamp,
             stray_restored_slot: tower.stray_restored_slot,
             last_switch_threshold_check: tower.last_switch_threshold_check,
+            mostly_confirmed_threshold: None, // Значения по умолчанию для новых полей
+            threshold_ahead_count: None,
+            after_skip_threshold: None,
+            threshold_escape_count: None,
+            last_config_check_seconds: 0,
         }
     }
 }
@@ -549,6 +572,32 @@ impl Tower {
             .unwrap_or(false)
     }
 
+    pub fn is_mostly_confirmed_threshold_enabled(&self) -> bool {
+        if let Some(_) = self.mostly_confirmed_threshold {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_slot_mostly_confirmed(
+        &self,
+        slot: Slot,
+        voted_stakes: &VotedStakes,
+        total_stake: Stake,
+    ) -> bool {
+        let mostly_confirmed_threshold = if let Some(m) = self.mostly_confirmed_threshold {
+            m
+        } else {
+            SWITCH_FORK_THRESHOLD
+        };
+
+        voted_stakes
+            .get(&slot)
+            .map(|stake| (*stake as f64 / total_stake as f64) > mostly_confirmed_threshold)
+            .unwrap_or(false)
+    }
+
     pub fn tower_slots(&self) -> Vec<Slot> {
         self.vote_state.tower()
     }
@@ -611,6 +660,134 @@ impl Tower {
     pub fn last_voted_slot_in_bank(bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {
         let vote_account = bank.get_vote_account(vote_account_pubkey)?;
         vote_account.vote_state_view().last_voted_slot()
+    }
+
+    pub fn update_config(&mut self) {
+        // Use this opportunity to possibly load new value for mostly_confirmed_threshold
+        let config_check_seconds = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .map_or(0, |x| x.as_secs());
+        if config_check_seconds >= (self.last_config_check_seconds + 60) {
+            // Format of mostly_confirmed_threshold:
+            // a.float b.int c.int d.int
+            // a is threshold - no slot that hasn't already achieved this vote weight will be voted on, except for
+            //   slots in the "vote ahead of threshold" region, unless the escape hatch distance has been reached
+            // b is "vote ahead of threshold" - how many slots ahead of the threshold slot to vote, regardless of
+            //   vote weight.  Reduces vote latency.
+            // c controls what stake weighted vote percentage is required on a slot after there have been skips.  It
+            //   must be one of these values:
+            //   0 -- no restriction
+            //   1 -- a slot after a skip has to have mostly_confirmed_threshold before it will be voted on
+            //   2 -- a slot after a skip has to be confirmed already before it will be voted on
+            // d is "escape hatch distance".  This is the number of slots of non-voting while waiting for threshold
+            //   to just vote anyway.  This is an escape hatch to allow network progress even if threshold is not
+            //   being achieved.  Without this, there could be deadlock if all validators ran this voting strategy
+            //   beacuse if multiple forks happen at once, it's possible for all forks to end up with less than
+            //   the threshold vote and no validator would ever switch forks.
+            warn!("patch checking (unlimited)");
+            self.last_config_check_seconds = config_check_seconds;
+
+            match read_to_string(&Path::new("/mostly_confirmed_threshold")) {
+                Ok(s) => {
+                    let split = s
+                        .strip_suffix("\n")
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .collect::<Vec<&str>>();
+                    warn!("patch UNLIMITED mostly_confirmed_threshold: {:?}", split);    
+                    match split.get(0).unwrap_or(&"").parse::<f64>() {
+                        Ok(threshold) => {
+                            if let Some(mostly_confirmed_threshold) =
+                                self.mostly_confirmed_threshold
+                            {
+                                if mostly_confirmed_threshold != threshold {
+                                    self.mostly_confirmed_threshold = Some(threshold);
+                                    warn!("Using new mostly_confirmed_threshold: {}", threshold);
+                                }
+                            } else {
+                                self.mostly_confirmed_threshold = Some(threshold);
+                                warn!("Using new mostly_confirmed_threshold: {}", threshold);
+                            }
+                        }
+                        _ => {
+                            warn!("Using NO mostly_confirmed_threshold");
+                            self.mostly_confirmed_threshold = None;
+                        }
+                    }
+                    match split.get(1).unwrap_or(&"").parse::<u8>() {
+                        Ok(count) => {
+                            if let Some(already_count) = self.threshold_ahead_count {
+                                if already_count != count {
+                                    self.threshold_ahead_count = Some(count);
+                                    warn!("Using new threshold_ahead_count: {}", count);
+                                }
+                            } else {
+                                self.threshold_ahead_count = Some(count);
+                                warn!("Using new threshold_ahead_count: {}", count);
+                            }
+                        }
+                        _ => {
+                            warn!("Using NO threshold_ahead_count");
+                            self.threshold_ahead_count = None;
+                        }
+                    }
+                    match split.get(2).unwrap_or(&"").parse::<u8>() {
+                        Ok(threshold) => {
+                            if let Some(already_after_skip_threshold) = self.after_skip_threshold {
+                                if already_after_skip_threshold != threshold {
+                                    self.after_skip_threshold = Some(threshold);
+                                    warn!("Using new after_skip_threshold: {}", threshold);
+                                }
+                            } else {
+                                self.after_skip_threshold = Some(threshold);
+                                warn!("Using new after_skip_threshold: {}", threshold);
+                            }
+                        }
+                        _ => {
+                            warn!("Using NO after_skip_threshold");
+                            self.after_skip_threshold = None;
+                        }
+                    }
+                    match split.get(3).unwrap_or(&"").parse::<u8>() {
+                        Ok(escape) => {
+                            if let Some(already_escape) = self.threshold_escape_count {
+                                if already_escape != escape {
+                                    self.threshold_escape_count = Some(escape);
+                                    warn!("Using new threshold_escape_count: {}", escape);
+                                }
+                            } else {
+                                self.threshold_escape_count = Some(escape);
+                                warn!("Using new threshold_escape_count: {}", escape);
+                            }
+                        }
+                        _ => {
+                            warn!("Using NO threshold_escape_count");
+                            self.threshold_escape_count = None;
+                        }
+                    }
+                }
+                _ => {
+                    warn!("patch: Error, can't read /mostly_confirmed_threshold");
+                    self.mostly_confirmed_threshold = None;
+                    self.threshold_ahead_count = None;
+                    self.after_skip_threshold = None;
+                    self.threshold_escape_count = None;
+                }
+            }
+        }
+    }
+
+    pub fn get_threshold_ahead_count(&self) -> Option<u8> {
+        return self.threshold_ahead_count;
+    }
+
+    pub fn get_after_skip_threshold(&self) -> Option<u8> {
+        return self.after_skip_threshold;
+    }
+
+    pub fn get_threshold_escape_count(&self) -> Option<u8> {
+        return self.threshold_escape_count;
     }
 
     pub fn record_bank_vote(&mut self, bank: &Bank) -> Option<Slot> {
@@ -680,7 +857,7 @@ impl Tower {
         trace!("{} record_vote for {}", self.node_pubkey, vote_slot);
         let old_root = self.root();
 
-        self.vote_state.process_next_vote_slot(vote_slot);
+        self.vote_state.process_next_vote_slot(vote_slot, true);
         self.update_last_vote_from_vote_state(vote_hash, enable_tower_sync_ix, block_id);
 
         let new_root = self.root();
