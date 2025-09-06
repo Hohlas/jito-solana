@@ -1,0 +1,18 @@
+[33mtag v3.0.0-patch2[m
+Tagger: hohlas <mail@hohla.ru>
+Date:   Thu Sep 4 22:34:51 2025 +0300
+
+v3.0.0-jito with custom patch v3 modifications
+
+[33mcommit 3884867ac3ae520c4e59a5e0844f66b3c60ce576[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mv3.0.0-patch-adaptation[m[33m, [m[1;33mtag: [m[1;33mv3.0.0-patch2[m[33m)[m
+Author: hohlas <mail@hohla.ru>
+Date:   Thu Sep 4 22:32:04 2025 +0300
+
+    Apply patch v3 modifications for v3.0.0-jito
+
+consensus_patch.diff
+core/src/commitment_service.rs
+core/src/consensus.rs
+core/src/replay_stage.rs
+core/src/vote_simulator.rs
+patch_v2.3.6.diff
